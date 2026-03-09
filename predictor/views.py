@@ -15,39 +15,41 @@ clustering_model = joblib.load(
     "model_generators/clustering/clustering_model.pkl")
 
 
-def classification_analysis(request):
-
+def data_exploration_view(request):
+    df = pd.read_csv("dummy-data/vehicles_ml_dataset.csv")
     context = {
-        "evaluations": evaluate_classification_model()
+        "data_exploration": data_exploration(df),
+        "dataset_exploration": dataset_exploration(df),
+        "evaluations": {
+            "regression": evaluate_regression_model(),
+            "classification": evaluate_classification_model(),
+            "clustering": evaluate_clustering_model()
+        }
     }
+    
+    # Handle form submissions for all models
     if request.method == "POST":
         year = int(request.POST["year"])
         km = float(request.POST["km"])
         seats = int(request.POST["seats"])
         income = float(request.POST["income"])
-        prediction = classification_model.predict(
-            [[year, km, seats, income]])[0]
-        context["prediction"] = prediction
-    return render(request, "predictor/classification_analysis.html", context)
-
-
-def clustering_analysis(request):
-
-    context = {
-        "evaluations": evaluate_clustering_model()
-    }
-    if request.method == "POST":
-        try:
-            year = int(request.POST["year"])
-            km = float(request.POST["km"])
-            seats = int(request.POST["seats"])
-            income = float(request.POST["income"])
+        
+        # Determine which form was submitted based on button name or hidden input
+        form_type = request.POST.get("form_type", "")
+        
+        if form_type == "regression" or "Predict Market Price" in request.POST.get("submit", ""):
+            prediction = regression_model.predict([[year, km, seats, income]])[0]
+            context["price"] = prediction
+            
+        elif form_type == "classification" or "Predict Income Category" in request.POST.get("submit", ""):
+            prediction = classification_model.predict([[year, km, seats, income]])[0]
+            context["prediction"] = prediction
+            
+        elif form_type == "clustering" or "Run Combined Inference" in request.POST.get("submit", ""):
             # Step 1: Predict price
-            predicted_price = regression_model.predict(
-                [[year, km, seats, income]])[0]
+            predicted_price = regression_model.predict([[year, km, seats, income]])[0]
             # Step 2: Predict cluster
-            cluster_id = clustering_model.predict(
-                [[income, predicted_price]])[0]
+            cluster_id = clustering_model.predict([[income, predicted_price]])[0]
             mapping = {
                 0: "Economy",
                 1: "Standard",
@@ -57,27 +59,5 @@ def clustering_analysis(request):
                 "prediction": mapping.get(cluster_id, "Unknown"),
                 "price": predicted_price
             })
-        except Exception as e:
-            context["error"] = str(e)
-    return render(request, "predictor/clustering_analysis.html", context)
-
-
-def data_exploration_view(request):
-    df = pd.read_csv("dummy-data/vehicles_ml_dataset.csv")
-    context = {
-        "data_exploration": data_exploration(df),
-        "dataset_exploration": dataset_exploration(df),
-    }
+    
     return render(request, "predictor/index.html", context)
-
-
-def regression_analysis(request):
-    context = {"evaluations": evaluate_regression_model()}
-    if request.method == "POST":
-        year = int(request.POST["year"])
-        km = float(request.POST["km"])
-        seats = int(request.POST["seats"])
-        income = float(request.POST["income"])
-        prediction = regression_model.predict([[year, km, seats, income]])[0]
-        context["price"] = prediction
-    return render(request, "predictor/regression_analysis.html", context)
