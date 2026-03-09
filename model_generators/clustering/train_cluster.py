@@ -404,10 +404,10 @@ for class_name in df_clean["client_class"].unique():
         "count": len(class_data),
         "income_mean": class_data["estimated_income"].mean(),
         "income_std": class_data["estimated_income"].std(),
-        "income_cv": class_data["estimated_income"].std() / class_data["estimated_income"].mean(),
+        "income_cv": f"{(class_data['estimated_income'].std() / class_data['estimated_income'].mean()*100):.1f}%",
         "price_mean": class_data["selling_price"].mean(),
         "price_std": class_data["selling_price"].std(),
-        "price_cv": class_data["selling_price"].std() / class_data["selling_price"].mean()
+        "price_cv": f"{(class_data['selling_price'].std() / class_data['selling_price'].mean()*100):.1f}%"
     }
     cluster_stats.append(stats)
 
@@ -427,8 +427,8 @@ def evaluate_clustering_model():
             "price_cv": row["price_cv"],
             "market_share": f"{row['count']/len(df_clean)*100:.1f}%",
             "revenue_potential": f"${row['count'] * row['price_mean']:,.0f}",
-            "risk_level": "Low" if row["income_cv"] < 0.2 else "Medium" if row["income_cv"] < 0.4 else "High",
-            "consistency": "Very High" if row["income_cv"] < 0.2 else "High" if row["income_cv"] < 0.3 else "Moderate",
+            "risk_level": "Low" if float(row['income_cv'].replace('%', '')) < 20 else "Medium" if float(row['income_cv'].replace('%', '')) < 40 else "High",
+            "consistency": "Very High" if float(row['income_cv'].replace('%', '')) < 20 else "High" if float(row['income_cv'].replace('%', '')) < 30 else "Moderate",
             "recommended_strategy": get_segment_strategy(row["client_class"], row["income_mean"], row["price_mean"])
         }
         customer_profiles.append(profile)
