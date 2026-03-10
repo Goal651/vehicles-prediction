@@ -10,31 +10,32 @@ import joblib
 import matplotlib.pyplot as plt
 from scipy import stats
 
+
 class KBinsClusteringOptimizer:
     """KBinsDiscretizer approach - achieves excellent silhouette scores"""
-    
+
     def __init__(self, features):
         self.features = features
         self.income_weight = 3
         self.kbd_i = None
         self.kbd_p = None
         self.kmeans = None
-        
+
     def build_features(self, df, fit=False):
         """Build features using KBinsDiscretizer with quantile strategy"""
         income = df["estimated_income"].to_numpy().reshape(-1, 1)
         price = df["selling_price"].to_numpy().reshape(-1, 1)
-        
+
         if fit:
             self.kbd_i = KBinsDiscretizer(
-                n_bins=3, 
-                encode="ordinal", 
+                n_bins=6,
+                encode="ordinal",
                 strategy="quantile",
                 quantile_method="averaged_inverted_cdf"
             )
             self.kbd_p = KBinsDiscretizer(
-                n_bins=3, 
-                encode="ordinal", 
+                n_bins=6,
+                encode="ordinal",
                 strategy="quantile",
                 quantile_method="averaged_inverted_cdf"
             )
@@ -43,16 +44,16 @@ class KBinsClusteringOptimizer:
         else:
             income_b = self.kbd_i.transform(income)
             price_b = self.kbd_p.transform(price)
-            
+
         X = np.column_stack([income_b * self.income_weight, price_b])
         return X
-    
+
     def calculate_cv(self, df, labels):
         """Calculate CV on original features (not binned)"""
         cv_scores = []
         df_temp = df.copy()
         df_temp["cluster_id"] = labels
-        
+
         for cluster_id in np.unique(labels):
             cluster_data = df_temp[df_temp["cluster_id"] == cluster_id]
             if len(cluster_data) > 1:
@@ -62,44 +63,58 @@ class KBinsClusteringOptimizer:
                     if mean_val != 0:
                         cv_val = (std_val / mean_val)
                         cv_scores.append(cv_val)
-        
+
         return np.mean(cv_scores) if cv_scores else 0
-    
+
     def label_clusters(self):
-        """Create meaningful cluster labels"""
+        """Create meaningful cluster labels for any number of bins"""
         centers = self.kmeans.cluster_centers_
-        sorted_idx = centers[:, 0].argsort()  # Sort by income axis
-        return {
-            int(sorted_idx[0]): "Economy",
-            int(sorted_idx[1]): "Standard", 
-            int(sorted_idx[2]): "Premium"
-        }
-    
+        # Sort the cluster indices by the first column (income)
+        sorted_idx = centers[:, 0].argsort()
+
+        # Professional names for a 6-tier system
+        names = [
+            "Budget",           # Lowest
+            "Economy",
+            "Mid-Market",
+            "Standard",
+            "Executive",
+            "Premium"           # Highest
+        ]
+
+        mapping = {}
+        for i, cluster_index in enumerate(sorted_idx):
+            # This loop maps the sorted cluster to the name in our list
+            mapping[int(cluster_index)] = names[i]
+
+        return mapping
+
     def fit_clustering(self, df):
         """Fit the KBins clustering model"""
         print("=== KBinsDiscretizer Clustering ===")
-        
+
         # Build binned features
         X = self.build_features(df, fit=True)
         print(f"Feature space shape: {X.shape}")
         print(f"Income bins: {np.unique(X[:, 0] // self.income_weight)}")
         print(f"Price bins: {np.unique(X[:, 1])}")
-        
+
         # Fit KMeans
-        self.kmeans = KMeans(n_clusters=3, random_state=42, n_init=100)
+        self.kmeans = KMeans(n_clusters=6, random_state=42, n_init=100)
         cluster_labels = self.kmeans.fit_predict(X)
-        
+
         # Calculate metrics
         silhouette = silhouette_score(X, cluster_labels)
         cv = self.calculate_cv(df, cluster_labels)
-        
+
         print(f"Silhouette Score: {silhouette:.4f}")
         print(f"CV Score: {cv:.3f}")
-        
+
         # Create labels
         cluster_mapping = self.label_clusters()
-        
+
         return df, cluster_labels, silhouette, cv, cluster_mapping
+
 
 class ProfessionalClusteringOptimizer:
     def __init__(self, features):
@@ -112,7 +127,7 @@ class ProfessionalClusteringOptimizer:
         self.kmeans = None
         self.optimal_k = None
         self.metrics_history = []
-        
+
     def calculate_cv(self, X, labels):
         """Calculate Coefficient of Variation for each cluster"""
         cv_scores = []
@@ -120,33 +135,36 @@ class ProfessionalClusteringOptimizer:
             cluster_data = X[labels == cluster_id]
             if len(cluster_data) > 1:
                 # CV = std/mean for each feature, then average
-                cv_per_feature = np.std(cluster_data, axis=0) / np.abs(np.mean(cluster_data, axis=0))
-                cv_per_feature = cv_per_feature[np.isfinite(cv_per_feature)]  # Remove infinite values
+                cv_per_feature = np.std(
+                    cluster_data, axis=0) / np.abs(np.mean(cluster_data, axis=0))
+                cv_per_feature = cv_per_feature[np.isfinite(
+                    cv_per_feature)]  # Remove infinite values
                 cv_scores.append(np.mean(cv_per_feature))
         return np.mean(cv_scores) if cv_scores else 0
-    
+
     def engineer_features(self, df):
         """Use original simple features - focus on good scaling"""
         # Keep original features - they work well for this data
         X = df[["estimated_income", "selling_price"]].copy()
         self.features = ["estimated_income", "selling_price"]
         return X
-    
+
     def preprocess_data(self, df):
         """Apply feature engineering, robust scaling and variance thresholding"""
         # Feature engineering
         X = self.engineer_features(df)
-        
+
         # Remove features with extremely low variance
         X_filtered = self.variance_threshold.fit_transform(X)
         if X_filtered.shape[1] < X.shape[1]:
-            print(f"Removed {X.shape[1] - X_filtered.shape[1]} low-variance features")
-        
+            print(
+                f"Removed {X.shape[1] - X_filtered.shape[1]} low-variance features")
+
         # Apply robust scaling (better for skewed data with outliers)
         X_scaled = self.scaler.fit_transform(X_filtered)
-        
+
         return X_scaled, X_filtered
-    
+
     def apply_pca(self, X, n_components=None):
         """Apply PCA for dimensionality reduction"""
         if n_components is None:
@@ -155,16 +173,18 @@ class ProfessionalClusteringOptimizer:
             temp_pca.fit(X)
             cumsum = np.cumsum(temp_pca.explained_variance_ratio_)
             n_components = np.argmax(cumsum >= 0.95) + 1
-            n_components = min(n_components, X.shape[1])  # Don't exceed features
-        
+            # Don't exceed features
+            n_components = min(n_components, X.shape[1])
+
         self.pca = PCA(n_components=n_components)
         X_pca = self.pca.fit_transform(X)
-        
+
         explained_variance = self.pca.explained_variance_ratio_.sum()
-        print(f"PCA: {n_components} components explain {explained_variance:.3f} variance")
-        
+        print(
+            f"PCA: {n_components} components explain {explained_variance:.3f} variance")
+
         return X_pca
-    
+
     def remove_outliers(self, X, method='isolation_forest'):
         """Conservative outlier removal to preserve data structure"""
         if method == 'dbscan':
@@ -172,36 +192,40 @@ class ProfessionalClusteringOptimizer:
             outlier_labels = dbscan.fit_predict(X)
             mask = outlier_labels != -1
         else:  # Isolation Forest - conservative
-            iso_forest = IsolationForest(contamination=0.03, random_state=42)  # Only 3%
+            iso_forest = IsolationForest(
+                contamination=0.03, random_state=42)  # Only 3%
             outlier_labels = iso_forest.fit_predict(X)
             mask = outlier_labels == 1
-        
+
         outliers_removed = X.shape[0] - mask.sum()
-        print(f"Removed {outliers_removed} outliers ({outliers_removed/X.shape[0]*100:.1f}%)")
-        
+        print(
+            f"Removed {outliers_removed} outliers ({outliers_removed/X.shape[0]*100:.1f}%)")
+
         return X[mask], mask
-    
-    def find_optimal_k(self, X, k_range=range(2, 6)):  # Focus on smaller K for consistency
+
+    # Focus on smaller K for consistency
+    def find_optimal_k(self, X, k_range=range(2, 6)):
         """Find optimal K with balanced approach"""
         best_score = float('-inf')
         best_k = 3
         best_metrics = None
-        
+
         for k in k_range:
-            kmeans = KMeans(n_clusters=k, random_state=42, n_init="auto", max_iter=300)
+            kmeans = KMeans(n_clusters=k, random_state=42,
+                            n_init="auto", max_iter=300)
             labels = kmeans.fit_predict(X)
-            
+
             silhouette = silhouette_score(X, labels)
             cv = self.calculate_cv(X, labels)
-            
+
             # Balanced scoring - both metrics matter
             combined_score = silhouette * 1.0 - cv * 0.8  # More balanced
-            
+
             # Small bonus for balanced clusters
             cluster_sizes = np.bincount(labels)
             balance_penalty = np.std(cluster_sizes) / np.mean(cluster_sizes)
             combined_score -= balance_penalty * 0.2
-            
+
             metrics = {
                 'k': k,
                 'silhouette': silhouette,
@@ -210,64 +234,67 @@ class ProfessionalClusteringOptimizer:
                 'balance_penalty': balance_penalty
             }
             self.metrics_history.append(metrics)
-            
+
             if combined_score > best_score:
                 best_score = combined_score
                 best_k = k
                 best_metrics = metrics
-        
+
         self.optimal_k = best_k
         if best_metrics:
-            print(f"Optimal K: {best_k} (Silhouette: {best_metrics['silhouette']:.3f}, CV: {best_metrics['cv']:.3f})")
+            print(
+                f"Optimal K: {best_k} (Silhouette: {best_metrics['silhouette']:.3f}, CV: {best_metrics['cv']:.3f})")
         else:
             print(f"Using default K: {best_k}")
         return best_k, best_metrics or {'silhouette': 0, 'cv': 0, 'combined_score': 0}
-    
+
     def fit_optimized_clustering(self, df, use_pca=True, remove_outliers_flag=True):
         """Complete optimized clustering pipeline"""
         print("=== Enhanced Professional Clustering Optimization ===")
-        
+
         # Step 1: Preprocessing with feature engineering
         X_scaled, X_filtered = self.preprocess_data(df)
         print(f"Data shape after preprocessing: {X_scaled.shape}")
-        
+
         # Step 2: Outlier removal
         if remove_outliers_flag:
-            X_clean, mask = self.remove_outliers(X_scaled, method='isolation_forest')
+            X_clean, mask = self.remove_outliers(
+                X_scaled, method='isolation_forest')
             df_clean = df.iloc[mask].reset_index(drop=True)
         else:
             X_clean = X_scaled
             df_clean = df.copy()
-        
+
         # Step 3: PCA if beneficial
         if use_pca and X_clean.shape[1] > 2:
             X_final = self.apply_pca(X_clean)
         else:
             X_final = X_clean
-        
+
         # Step 4: Find optimal K
         optimal_k, metrics = self.find_optimal_k(X_final)
-        
+
         # Step 5: Final clustering with better initialization
         self.kmeans = KMeans(
-            n_clusters=optimal_k, 
-            random_state=42, 
+            n_clusters=optimal_k,
+            random_state=42,
             n_init="auto",
             init='k-means++',
             max_iter=300
         )
         cluster_labels = self.kmeans.fit_predict(X_final)
-        
+
         # Calculate final metrics
         final_silhouette = silhouette_score(X_final, cluster_labels)
         final_cv = self.calculate_cv(X_final, cluster_labels)
-        
+
         print(f"\nFinal Results:")
         print(f"- Silhouette Score: {final_silhouette:.3f}")
         print(f"- Coefficient of Variation: {final_cv:.3f}")
         print(f"- Number of Clusters: {optimal_k}")
-        
+
         return df_clean, cluster_labels, final_silhouette, final_cv
+
 
 # Initialize with KBins as primary approach
 SEGMENT_FEATURES = ["estimated_income", "selling_price"]
@@ -279,7 +306,8 @@ print("Testing multiple approaches to find the best method...\n")
 # 1. KBinsDiscretizer Approach (Primary)
 print("1. TESTING KBINS DISCRETIZER APPROACH")
 kbins_optimizer = KBinsClusteringOptimizer(SEGMENT_FEATURES)
-df_kbins, labels_kbins, silhouette_kbins, cv_kbins, mapping_kbins = kbins_optimizer.fit_clustering(df)
+df_kbins, labels_kbins, silhouette_kbins, cv_kbins, mapping_kbins = kbins_optimizer.fit_clustering(
+    df)
 
 # 2. Baseline Approach
 print("\n2. TESTING BASELINE APPROACH")
@@ -293,28 +321,36 @@ cv_scores_baseline = []
 for cluster_id in np.unique(labels_baseline):
     cluster_data = X_baseline[labels_baseline == cluster_id]
     if len(cluster_data) > 1:
-        cv_per_feature = np.std(cluster_data, axis=0) / np.abs(np.mean(cluster_data, axis=0))
+        cv_per_feature = np.std(cluster_data, axis=0) / \
+            np.abs(np.mean(cluster_data, axis=0))
         cv_per_feature = cv_per_feature[np.isfinite(cv_per_feature)]
         cv_scores_baseline.append(np.mean(cv_per_feature))
 cv_baseline = np.mean(cv_scores_baseline) if cv_scores_baseline else 0
 
-print(f"Baseline - Silhouette: {silhouette_baseline:.3f}, CV: {cv_baseline:.3f}")
+print(
+    f"Baseline - Silhouette: {silhouette_baseline:.3f}, CV: {cv_baseline:.3f}")
 
 # 3. Optimized Approach (if needed)
 print("\n3. TESTING OPTIMIZED APPROACH")
 optimizer = ProfessionalClusteringOptimizer(SEGMENT_FEATURES)
-df_opt, labels_opt, silhouette_opt, cv_opt = optimizer.fit_optimized_clustering(df)
+df_opt, labels_opt, silhouette_opt, cv_opt = optimizer.fit_optimized_clustering(
+    df)
 
 # Compare all approaches
 print(f"\n=== APPROACH COMPARISON ===")
-print(f"KBins Discretizer: Silhouette={silhouette_kbins:.3f}, CV={cv_kbins:.3f}")
-print(f"Baseline:          Silhouette={silhouette_baseline:.3f}, CV={cv_baseline:.3f}")
+print(
+    f"KBins Discretizer: Silhouette={silhouette_kbins:.3f}, CV={cv_kbins:.3f}")
+print(
+    f"Baseline:          Silhouette={silhouette_baseline:.3f}, CV={cv_baseline:.3f}")
 print(f"Optimized:         Silhouette={silhouette_opt:.3f}, CV={cv_opt:.3f}")
 
 # Intelligent selection - prioritize silhouette, then CV
+
+
 def calculate_approach_score(silhouette, cv):
     """Higher is better - silhouette weighted more heavily"""
     return silhouette * 2.0 - cv * 0.5
+
 
 scores = {
     'KBins': calculate_approach_score(silhouette_kbins, cv_kbins),
@@ -323,7 +359,8 @@ scores = {
 }
 
 best_approach = max(scores, key=scores.get)
-print(f"\n✅ {best_approach.upper()} APPROACH SELECTED (Score: {scores[best_approach]:.3f})")
+print(
+    f"\n✅ {best_approach.upper()} APPROACH SELECTED (Score: {scores[best_approach]:.3f})")
 
 # Use the best approach
 if best_approach == 'KBins':
@@ -333,7 +370,7 @@ if best_approach == 'KBins':
     cv_score = cv_kbins
     cluster_mapping = mapping_kbins
     optimizer.kmeans = kbins_optimizer.kmeans
-    optimizer.optimal_k = 3
+    optimizer.optimal_k = 6
 elif best_approach == 'Baseline':
     df_clean = df.copy()
     cluster_labels = labels_baseline
@@ -372,7 +409,7 @@ else:  # Optimized
             labels = ["Basic", "Economy", "Standard", "Premium", "Luxury"]
         else:
             labels = [f"Segment_{i+1}" for i in range(optimizer.optimal_k)]
-        
+
         if i < len(labels):
             cluster_mapping[cluster_idx] = labels[i]
         else:
@@ -393,7 +430,8 @@ cluster_summary = df_clean.groupby("client_class")[SEGMENT_FEATURES].mean()
 cluster_counts = df_clean["client_class"].value_counts().reset_index()
 cluster_counts.columns = ["client_class", "count"]
 cluster_summary = cluster_summary.merge(cluster_counts, on="client_class")
-comparison_df = df_clean[["client_name", "estimated_income", "selling_price", "client_class"]]
+comparison_df = df_clean[["client_name",
+                          "estimated_income", "selling_price", "client_class"]]
 
 # Calculate detailed cluster statistics
 cluster_stats = []
@@ -414,10 +452,39 @@ for class_name in df_clean["client_class"].unique():
 cluster_stats_df = pd.DataFrame(cluster_stats)
 
 def evaluate_clustering_model():
-    # Enhanced customer profiling
-    customer_profiles = []
+    # 1. Define the logical economic order for 6 segments
+    logit_order = ["Budget", "Economy", "Mid-Market", "Standard", "Executive", "Premium"]
+
+    # 2. Ensure df_clean uses this order for all downstream operations
+    df_clean["client_class"] = pd.Categorical(
+        df_clean["client_class"], 
+        categories=logit_order, 
+        ordered=True
+    )
+    market_cv_income = df_clean["estimated_income"].std() / df_clean["estimated_income"].mean()
+    market_cv_price = df_clean["selling_price"].std() / df_clean["selling_price"].mean()
+    true_overall_cv = np.mean([market_cv_income, market_cv_price])
     
+    # 3. Sort the existing stats dataframes to match the order
+    global cluster_stats_df, cluster_summary
+    # Sort these based on the categorical client_class
+    cluster_stats_df = cluster_stats_df.sort_values("client_class")
+    
+    # Re-calculate sorted_summary to ensure it's clean and ordered
+    temp_summary = df_clean.groupby("client_class", observed=False)[SEGMENT_FEATURES].mean().reset_index()
+    temp_counts = df_clean["client_class"].value_counts().reset_index()
+    temp_counts.columns = ["client_class", "count"]
+    sorted_cluster_summary = temp_summary.merge(temp_counts, on="client_class").sort_values("client_class")
+
+    # 4. Enhanced customer profiling (using sorted data)
+    customer_profiles = []
     for _, row in cluster_stats_df.iterrows():
+        # Handle the CV string to float conversion safely for logic checks
+        try:
+            inc_cv_val = float(str(row['income_cv']).replace('%', ''))
+        except:
+            inc_cv_val = 0
+
         profile = {
             "segment": row["client_class"],
             "size": row["count"],
@@ -427,24 +494,24 @@ def evaluate_clustering_model():
             "price_cv": row["price_cv"],
             "market_share": f"{row['count']/len(df_clean)*100:.1f}%",
             "revenue_potential": f"${row['count'] * row['price_mean']:,.0f}",
-            "risk_level": "Low" if float(row['income_cv'].replace('%', '')) < 20 else "Medium" if float(row['income_cv'].replace('%', '')) < 40 else "High",
-            "consistency": "Very High" if float(row['income_cv'].replace('%', '')) < 20 else "High" if float(row['income_cv'].replace('%', '')) < 30 else "Moderate",
+            "risk_level": "Low" if inc_cv_val < 20 else "Medium" if inc_cv_val < 40 else "High",
+            "consistency": "Very High" if inc_cv_val < 20 else "High" if inc_cv_val < 30 else "Moderate",
             "recommended_strategy": get_segment_strategy(row["client_class"], row["income_mean"], row["price_mean"])
         }
         customer_profiles.append(profile)
-    
+
     profiles_df = pd.DataFrame(customer_profiles)
-    
-    # Statistical validation
+
+    # 5. Statistical validation (ANOVA) using the explicit order
     from scipy.stats import f_oneway
     income_groups = [df_clean[df_clean["client_class"] == seg]["estimated_income"].values 
-                     for seg in df_clean["client_class"].unique()]
+                     for seg in logit_order]
     price_groups = [df_clean[df_clean["client_class"] == seg]["selling_price"].values 
-                   for seg in df_clean["client_class"].unique()]
-    
+                   for seg in logit_order]
+
     income_f_stat, income_p_value = f_oneway(*income_groups)
     price_f_stat, price_p_value = f_oneway(*price_groups)
-    
+
     statistical_significance = {
         "income_anova": {
             "f_statistic": round(income_f_stat, 3),
@@ -452,19 +519,20 @@ def evaluate_clustering_model():
             "significant": income_p_value < 0.001
         },
         "price_anova": {
-            "f_statistic": round(price_f_stat, 3), 
+            "f_statistic": round(price_f_stat, 3),
             "p_value": f"{price_p_value:.2e}",
             "significant": price_p_value < 0.001
         }
     }
-    
+
+    # 6. Return the full payload for the dashboard
     return {
         "silhouette": round(silhouette_avg, 3),
-        "cv_score": round(cv_score, 3),
+        "cv_score": round(true_overall_cv, 3),
         "optimal_k": optimizer.optimal_k,
         "data_points": len(df_clean),
         "approach_used": best_approach,
-        "summary": cluster_summary.to_html(
+        "summary": sorted_cluster_summary.to_html(
             classes="table table-bordered table-striped table-sm",
             float_format="%.2f",
             justify="center",
@@ -489,7 +557,7 @@ def evaluate_clustering_model():
             index=False,
         ),
         "statistical_significance": statistical_significance,
-        "comparison": comparison_df.head(10).to_html(
+        "comparison": df_clean.sort_values("client_class").head(10).to_html(
             classes="table table-bordered table-striped table-sm",
             float_format="%.2f",
             justify="center",
@@ -498,58 +566,48 @@ def evaluate_clustering_model():
     }
 
 def get_segment_strategy(segment, avg_income, avg_price):
-    """Generate business strategy recommendations per segment"""
     strategies = {
-        "Economy": [
-            "Focus on volume sales and competitive pricing",
-            "Emphasize fuel efficiency and reliability",
-            "Target first-time buyers and budget-conscious customers",
-            "Implement streamlined financing options"
-        ],
-        "Standard": [
-            "Balance value and premium features",
-            "Highlight technology and safety features",
-            "Target middle-income families and professionals",
-            "Offer flexible upgrade paths"
-        ],
-        "Premium": [
-            "Emphasize luxury, performance, and exclusivity",
-            "Provide premium customer service and personalization",
-            "Target high-net-worth individuals and enthusiasts",
-            "Create loyalty programs and exclusive events"
-        ]
+        "Budget": ["Focus on extreme affordability", "Micro-financing options"],
+        "Economy": ["Focus on volume sales", "Fuel efficiency"],
+        "Mid-Market": ["Balance of features and price"],
+        "Standard": ["Technology and safety focus"],
+        "Executive": ["Performance and comfort focus"],
+        "Premium": ["Luxury and exclusive events"]
     }
-    
-    return "; ".join(strategies.get(segment, ["Standard approach"]))
+    return "; ".join(strategies.get(segment, ["General Market Strategy"]))
 
 def predict_cluster(income_val, price_val):
     """Predict a single client's cluster label given raw income and price."""
     try:
         # Load the saved model and metadata
-        kmeans = joblib.load("model_generators/clustering/clustering_model.pkl")
-        metadata = joblib.load("model_generators/clustering/clustering_metadata.pkl")
-        
+        kmeans = joblib.load(
+            "model_generators/clustering/clustering_model.pkl")
+        metadata = joblib.load(
+            "model_generators/clustering/clustering_metadata.pkl")
+
         # Create input dataframe
-        df_tmp = pd.DataFrame({"estimated_income": [income_val], "selling_price": [price_val]})
-        
+        df_tmp = pd.DataFrame(
+            {"estimated_income": [income_val], "selling_price": [price_val]})
+
         # Use the appropriate prediction method based on approach
         if metadata['approach'] == 'KBins':
             # Use KBinsDiscretizer approach
             income = df_tmp["estimated_income"].to_numpy().reshape(-1, 1)
             price = df_tmp["selling_price"].to_numpy().reshape(-1, 1)
-            
+
             income_b = metadata['kbd_i'].transform(income)
             price_b = metadata['kbd_p'].transform(price)
-            X = np.column_stack([income_b * metadata['income_weight'], price_b])
-            
+            X = np.column_stack(
+                [income_b * metadata['income_weight'], price_b])
+
             cluster_id = int(kmeans.predict(X)[0])
             cluster_mapping = metadata['cluster_mapping']
-            
+
         else:
             # Use baseline/optimized approach
             X = df_tmp[SEGMENT_FEATURES]
             cluster_id = int(kmeans.predict(X)[0])
-            
+
             # Create mapping if not in metadata
             if 'cluster_mapping' in metadata:
                 cluster_mapping = metadata['cluster_mapping']
@@ -562,44 +620,55 @@ def predict_cluster(income_val, price_val):
                     int(sorted_idx[1]): "Standard",
                     int(sorted_idx[2]): "Premium"
                 }
-        
+
         return cluster_mapping.get(cluster_id, "Unknown")
-        
+
     except Exception as e:
         print(f"Error in predict_cluster: {e}")
         return "Error"
 
+
 def get_optimization_recommendations():
     """Provide recommendations based on clustering results"""
     recommendations = []
-    
+
     if silhouette_avg > 0.9:
-        recommendations.append("Exceptional silhouette score indicates excellent cluster separation.")
+        recommendations.append(
+            "Exceptional silhouette score indicates excellent cluster separation.")
     elif silhouette_avg > 0.7:
-        recommendations.append("Excellent silhouette score indicates well-separated clusters.")
+        recommendations.append(
+            "Excellent silhouette score indicates well-separated clusters.")
     elif silhouette_avg > 0.5:
-        recommendations.append("Good silhouette score indicates decent cluster separation.")
+        recommendations.append(
+            "Good silhouette score indicates decent cluster separation.")
     else:
-        recommendations.append("Low silhouette score suggests poor cluster separation. Consider feature engineering.")
-    
+        recommendations.append(
+            "Low silhouette score suggests poor cluster separation. Consider feature engineering.")
+
     if cv_score < 0.3:
         recommendations.append("Excellent CV shows very consistent clusters.")
     elif cv_score < 0.5:
         recommendations.append("Good CV shows reasonably consistent clusters.")
     else:
-        recommendations.append("High CV indicates inconsistent clusters. Consider different preprocessing.")
-    
+        recommendations.append(
+            "High CV indicates inconsistent clusters. Consider different preprocessing.")
+
     if best_approach == 'KBins':
-        recommendations.append("KBinsDiscretizer approach selected - excellent for creating balanced, well-separated clusters.")
+        recommendations.append(
+            "KBinsDiscretizer approach selected - excellent for creating balanced, well-separated clusters.")
     elif best_approach == 'Baseline':
-        recommendations.append("Baseline approach selected - simple and effective for this data structure.")
+        recommendations.append(
+            "Baseline approach selected - simple and effective for this data structure.")
     else:
-        recommendations.append("Optimized approach selected - advanced preprocessing techniques applied.")
-    
+        recommendations.append(
+            "Optimized approach selected - advanced preprocessing techniques applied.")
+
     return recommendations
 
+
 # Save the best model and metadata
-joblib.dump(optimizer.kmeans, "model_generators/clustering/clustering_model.pkl")
+joblib.dump(optimizer.kmeans,
+            "model_generators/clustering/clustering_model.pkl")
 
 # Save additional metadata for the KBins approach
 if best_approach == 'KBins':
