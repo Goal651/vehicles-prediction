@@ -451,30 +451,36 @@ for class_name in df_clean["client_class"].unique():
 
 cluster_stats_df = pd.DataFrame(cluster_stats)
 
+
 def evaluate_clustering_model():
     # 1. Define the logical economic order for 6 segments
-    logit_order = ["Budget", "Economy", "Mid-Market", "Standard", "Executive", "Premium"]
+    logit_order = ["Budget", "Economy", "Mid-Market",
+                   "Standard", "Executive", "Premium"]
 
     # 2. Ensure df_clean uses this order for all downstream operations
     df_clean["client_class"] = pd.Categorical(
-        df_clean["client_class"], 
-        categories=logit_order, 
+        df_clean["client_class"],
+        categories=logit_order,
         ordered=True
     )
-    market_cv_income = df_clean["estimated_income"].std() / df_clean["estimated_income"].mean()
-    market_cv_price = df_clean["selling_price"].std() / df_clean["selling_price"].mean()
+    market_cv_income = df_clean["estimated_income"].std(
+    ) / df_clean["estimated_income"].mean()
+    market_cv_price = df_clean["selling_price"].std(
+    ) / df_clean["selling_price"].mean()
     true_overall_cv = np.mean([market_cv_income, market_cv_price])
-    
+
     # 3. Sort the existing stats dataframes to match the order
     global cluster_stats_df, cluster_summary
     # Sort these based on the categorical client_class
     cluster_stats_df = cluster_stats_df.sort_values("client_class")
-    
+
     # Re-calculate sorted_summary to ensure it's clean and ordered
-    temp_summary = df_clean.groupby("client_class", observed=False)[SEGMENT_FEATURES].mean().reset_index()
+    temp_summary = df_clean.groupby("client_class", observed=False)[
+        SEGMENT_FEATURES].mean().reset_index()
     temp_counts = df_clean["client_class"].value_counts().reset_index()
     temp_counts.columns = ["client_class", "count"]
-    sorted_cluster_summary = temp_summary.merge(temp_counts, on="client_class").sort_values("client_class")
+    sorted_cluster_summary = temp_summary.merge(
+        temp_counts, on="client_class").sort_values("client_class")
 
     # 4. Enhanced customer profiling (using sorted data)
     customer_profiles = []
@@ -482,6 +488,7 @@ def evaluate_clustering_model():
         # Handle the CV string to float conversion safely for logic checks
         try:
             inc_cv_val = float(str(row['income_cv']).replace('%', ''))
+
         except:
             inc_cv_val = 0
 
@@ -504,10 +511,10 @@ def evaluate_clustering_model():
 
     # 5. Statistical validation (ANOVA) using the explicit order
     from scipy.stats import f_oneway
-    income_groups = [df_clean[df_clean["client_class"] == seg]["estimated_income"].values 
+    income_groups = [df_clean[df_clean["client_class"] == seg]["estimated_income"].values
                      for seg in logit_order]
-    price_groups = [df_clean[df_clean["client_class"] == seg]["selling_price"].values 
-                   for seg in logit_order]
+    price_groups = [df_clean[df_clean["client_class"] == seg]["selling_price"].values
+                    for seg in logit_order]
 
     income_f_stat, income_p_value = f_oneway(*income_groups)
     price_f_stat, price_p_value = f_oneway(*price_groups)
@@ -528,7 +535,8 @@ def evaluate_clustering_model():
     # 6. Return the full payload for the dashboard
     return {
         "silhouette": round(silhouette_avg, 3),
-        "cv_score": round(true_overall_cv, 3),
+        "estimated_income_cv_score": round(market_cv_income, 3),
+        "selling_price_cv_score": round(market_cv_price, 3),
         "optimal_k": optimizer.optimal_k,
         "data_points": len(df_clean),
         "approach_used": best_approach,
@@ -565,6 +573,7 @@ def evaluate_clustering_model():
         ),
     }
 
+
 def get_segment_strategy(segment, avg_income, avg_price):
     strategies = {
         "Budget": ["Focus on extreme affordability", "Micro-financing options"],
@@ -575,6 +584,7 @@ def get_segment_strategy(segment, avg_income, avg_price):
         "Premium": ["Luxury and exclusive events"]
     }
     return "; ".join(strategies.get(segment, ["General Market Strategy"]))
+
 
 def predict_cluster(income_val, price_val):
     """Predict a single client's cluster label given raw income and price."""

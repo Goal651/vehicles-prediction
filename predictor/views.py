@@ -18,11 +18,12 @@ def data_exploration_view(request):
     clustering_eval = evaluate_clustering_model()
     
     # CV metrics from clustering  
-    cv_score_value = clustering_eval.get("cv_score", 0)
+    estimated_income_cv_score = clustering_eval.get("estimated_income_cv_score", 0)
+    selling_price_cv_score=clustering_eval.get("selling_price_cv_score",0)
     cv_metrics = {
-        "income_cv": f"{cv_score_value:.1%}" if cv_score_value != "N/A" else "N/A",
-        "price_cv": f"{cv_score_value:.1%}" if cv_score_value != "N/A" else "N/A",
-        "average_cv": f"{cv_score_value:.1%}" if cv_score_value != "N/A" else "N/A"
+        "income_cv": f"{estimated_income_cv_score:.1%}" if estimated_income_cv_score != "N/A" else "N/A",
+        "price_cv": f"{selling_price_cv_score:.1%}" if selling_price_cv_score != "N/A" else "N/A",
+        "average_cv": f"{selling_price_cv_score:.1%}" if selling_price_cv_score != "N/A" else "N/A"
     }
     
     context = {
